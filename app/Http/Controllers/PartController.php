@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Part;
+use App\Models\Exercise;
 use Illuminate\Http\JsonResponse;
 
 class PartController extends Controller
@@ -30,5 +31,14 @@ class PartController extends Controller
         }])->findOrFail($id);
         
         return response()->json($part);
+    }
+        public function getByPart($partId): JsonResponse
+    {
+        $exercises = Exercise::where('part_id', $partId)
+            ->where('is_active', true)
+            ->orderBy('order_index')
+            ->get();
+            
+        return response()->json($exercises);
     }
 }

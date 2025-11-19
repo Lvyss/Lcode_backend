@@ -34,6 +34,14 @@
         });
 
         // ✅ DASHBOARD & PROGRESS
+            // ✅ PROFILE ROUTES
+    Route::get('/user/profile-stats', [UserController::class, 'getProfileStats']);
+    Route::get('/user/tree-progress', [TreeController::class, 'getUserTreeProgress']);
+    Route::get('/user/leaderboard', [UserController::class, 'getLeaderboard']);
+    
+    // ✅ UPDATE PROFILE
+    Route::put('/user/profile', [UserController::class, 'updateProfile']);
+    
         Route::get('/user/progress', [ProgressController::class, 'getUserProgress']);
     Route::get('/user/badges', [BadgeController::class, 'getUserBadges']);
     Route::get('/sections/{sectionId}/badges', [BadgeController::class, 'getSectionBadges']);
@@ -49,14 +57,14 @@
         // ✅ PART LEARNING FLOW
         Route::get('/parts/{id}', [PartController::class, 'show']); 
         Route::get('/parts/{id}/content', [PartController::class, 'getWithContent']);
-        Route::get('/parts/{id}/exercises', [ExerciseController::class, 'getByPart']);
+        Route::get('/parts/{id}/exercises', [PartController::class, 'getByPart']);
 
         // ✅ PROGRESS TRACKING
         Route::post('/progress/complete-exercise', [ProgressController::class, 'completeExercise']);
             Route::get('/progress/part/{partId}', [ProgressController::class, 'getPartProgress']); 
                  Route::get('/progress/section/{sectionId}', [ProgressController::class, 'getSectionProgress']);
             Route::get('/progress/exercise-status/{exerciseId}', [ProgressController::class, 'getExerciseStatus']);
-    Route::post('/exercises/code-test/check', [ExerciseController::class, 'checkCodeTest']);
+
 
 
         // ADMIN ROUTES

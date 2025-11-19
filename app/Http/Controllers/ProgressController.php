@@ -12,9 +12,11 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-
+use Illuminate\Support\Facades\Http;
 class ProgressController extends Controller
 {
+
+// app/Http/Controllers/ProgressController.php
 
 public function completeExercise(Request $request)
 {
@@ -32,10 +34,12 @@ public function completeExercise(Request $request)
             return response()->json(['error' => 'User not found'], 404);
         }
         
-        // ✅ CHECK CORRECTNESS
-        $isCorrect = $this->checkAnswerCorrectness($exercise, $request->user_answer);
+        // ✅ UNIFIED ANSWER CHECKING - SUPPORT SEMUA TYPE!
+        $validationResult = $this->checkAnswerCorrectness($exercise, $request->user_answer);
+        $isCorrect = $validationResult['is_correct'];
+        $actualOutput = $validationResult['actual_output'] ?? '';
         
-        // ✅ HANYA KASIH EXP KALAU BENAR
+        // ✅ EXERCISE REWARD - HANYA JIKA BENAR!
         $expEarned = $isCorrect ? $exercise->exp_reward : 0;
         $totalExpEarned = $expEarned;
         
@@ -70,29 +74,29 @@ public function completeExercise(Request $request)
             ]
         );
 
-        // ✅ CHECK PART COMPLETION
+        // ✅ CHECK PART & SECTION COMPLETION - HANYA JIKA BENAR!
         $partCompleted = false;
         $partExpEarned = 0;
-        $awardedBadges = []; // ✅ NEW: Store awarded badges
+        $sectionCompleted = false;
+        $sectionExpEarned = 0;
+        $awardedBadges = [];
         
         if ($isCorrect) {
+            // ✅ CHECK PART COMPLETION
             $partCompletion = $this->checkPartCompletion($exercise->part_id, $userId);
             $partCompleted = $partCompletion['completed'];
             $partExpEarned = $partCompletion['bonus_exp'];
             
-            // ✅ ADD PART BONUS EXP TO USER
+            // ✅ ADD PART BONUS EXP
             if ($partCompleted && $partExpEarned > 0) {
                 $user->total_exp += $partExpEarned;
                 $user->save();
                 $totalExpEarned += $partExpEarned;
                 
-                Log::info("🎉 PART COMPLETION BONUS AWARDED: User {$userId} earned {$partExpEarned} EXP for completing part {$exercise->part_id}");
+                Log::info("🎉 PART COMPLETION BONUS: User {$userId} earned {$partExpEarned} EXP for part {$exercise->part_id}");
             }
             
-            // ✅ CHECK SECTION COMPLETION (HANYA JIKA PART COMPLETED)
-            $sectionCompleted = false;
-            $sectionExpEarned = 0;
-            
+            // ✅ CHECK SECTION COMPLETION
             if ($partCompleted) {
                 $part = Part::find($exercise->part_id);
                 if ($part) {
@@ -100,38 +104,42 @@ public function completeExercise(Request $request)
                     $sectionCompleted = $sectionCompletion['completed'];
                     $sectionExpEarned = $sectionCompletion['bonus_exp'];
                     
-                    // ✅ ADD SECTION BONUS EXP TO USER
+                    // ✅ ADD SECTION BONUS EXP
                     if ($sectionCompleted && $sectionExpEarned > 0) {
                         $user->total_exp += $sectionExpEarned;
                         $user->save();
                         $totalExpEarned += $sectionExpEarned;
                         
-                        Log::info("🏆 SECTION COMPLETION BONUS AWARDED: User {$userId} earned {$sectionExpEarned} EXP for completing section {$part->section_id}");
+                        Log::info("🏆 SECTION COMPLETION BONUS: User {$userId} earned {$sectionExpEarned} EXP for section {$part->section_id}");
                     }
 
-                    // ✅ CHECK AND AWARD BADGES - NEW!
+                    // ✅ CHECK BADGES
                     $badgeService = new BadgeService();
                     $awardedBadges = $badgeService->checkAndAwardBadges($user, $part->section_id);
-                    
-                    Log::info("🎖️ BADGES CHECKED: Awarded " . count($awardedBadges) . " badges for user {$userId}");
                 }
             }
+        } else {
+            // ✅ LOG KALAU SALAH
+            Log::info("❌ WRONG ANSWER: User {$userId} - Exercise {$exercise->id}, Type: {$exercise->type}");
         }
 
         // ✅ REFRESH USER DATA
         $user->refresh();
 
+        // ✅ UNIFIED RESPONSE FOR ALL EXERCISE TYPES
         return response()->json([
             'success' => true,
             'is_correct' => $isCorrect,
+            'actual_output' => $actualOutput, // ✅ UNTUK CODE TEST
+            'expected_output' => $exercise->type === 'code_test' ? ($exercise->solution['expected_output'] ?? '') : '',
             'exp_earned' => $expEarned,
             'part_completed' => $partCompleted,
             'part_exp_earned' => $partExpEarned,
-            'section_completed' => $sectionCompleted ?? false,
-            'section_exp_earned' => $sectionExpEarned ?? 0,
+            'section_completed' => $sectionCompleted,
+            'section_exp_earned' => $sectionExpEarned,
             'total_exp_earned' => $totalExpEarned,
             'user_total_exp' => $user->total_exp,
-            'awarded_badges' => $awardedBadges, // ✅ NEW: Return awarded badges
+            'awarded_badges' => $awardedBadges,
             'progress' => $progress
         ]);
     });
@@ -139,31 +147,107 @@ public function completeExercise(Request $request)
     /**
      * CHECK ANSWER CORRECTNESS BERDASARKAN EXERCISE TYPE
      */
-private function checkAnswerCorrectness(Exercise $exercise, string $userAnswer): bool
+// app/Http/Controllers/ProgressController.php
+
+/**
+ * ✅ UNIFIED ANSWER VALIDATION - SUPPORT SEMUA TYPE!
+ */
+private function checkAnswerCorrectness(Exercise $exercise, string $userAnswer): array
 {
     $solution = $exercise->solution;
     $userAnswer = trim($userAnswer);
 
     switch ($exercise->type) {
         case 'multiple_choice':
-            return $this->validateMultipleChoice($solution, $userAnswer);
+            $isCorrect = $this->validateMultipleChoice($solution, $userAnswer);
+            return ['is_correct' => $isCorrect];
             
         case 'fill_blank':
-            return $this->validateFillBlank($solution, $userAnswer);
+            $isCorrect = $this->validateFillBlank($solution, $userAnswer);
+            return ['is_correct' => $isCorrect];
             
         case 'code_test':
-            // ✅ FIX: JANGAN LANGSUNG RETURN FALSE!
-            // Untuk code_test, kita pake method terpisah di ExerciseController
-            // Tapi tetep perlu handle di sini untuk backward compatibility
-            $expectedOutput = $solution['expected_output'] ?? '';
-            return trim($userAnswer) === trim($expectedOutput);
+            // ✅ PAKE EXECUTION ENGINE UNTUK CODE TEST!
+            return $this->validateCodeTest($exercise, $userAnswer);
             
         default:
             $correctAnswer = $solution['correct_answer'] ?? '';
-            return $userAnswer === trim($correctAnswer);
+            $isCorrect = $userAnswer === trim($correctAnswer);
+            return ['is_correct' => $isCorrect];
     }
 }
 
+/**
+ * ✅ CODE TEST VALIDATION DENGAN EXECUTION
+ */
+private function validateCodeTest(Exercise $exercise, string $userAnswer): array
+{
+    try {
+        // ✅ CODE EXECUTION - SAMA DENGAN YANG DI ExerciseController
+        $fullCode = str_replace('____', $userAnswer, $exercise->code_template);
+        $executionResult = $this->executeCode($fullCode);
+        
+        $expectedOutput = $exercise->solution['expected_output'] ?? '';
+        $actualOutput = $executionResult['output'];
+        
+        // ✅ CASE SENSITIVE COMPARISON
+        $isCorrect = trim($actualOutput) === trim($expectedOutput);
+        
+        return [
+            'is_correct' => $isCorrect,
+            'actual_output' => $actualOutput
+        ];
+        
+    } catch (\Exception $e) {
+        Log::error('Code execution failed: ' . $e->getMessage());
+        
+        return [
+            'is_correct' => false,
+            'actual_output' => '(Execution Error)'
+        ];
+    }
+}
+
+/**
+ * ✅ CODE EXECUTION ENGINE - COPY DARI ExerciseController
+ */
+private function executeCode($code)
+{
+    try {
+        $response = Http::post('https://emkc.org/api/v2/piston/execute', [
+            'language' => 'cpp',
+            'version' => '10.2.0',
+            'files' => [
+                [
+                    'name' => 'main.cpp',
+                    'content' => $code
+                ]
+            ],
+            'stdin' => '',
+            'args' => []
+        ]);
+
+        if (!$response->successful()) {
+            throw new \Exception('Piston API request failed: ' . $response->status());
+        }
+
+        $result = $response->json();
+        
+        if (isset($result['run']['stdout'])) {
+            return [
+                'output' => trim($result['run']['stdout']),
+                'status' => 'success'
+            ];
+        } else if (isset($result['run']['stderr'])) {
+            throw new \Exception('Execution error: ' . $result['run']['stderr']);
+        } else {
+            throw new \Exception('Unknown execution error');
+        }
+
+    } catch (\Exception $e) {
+        throw new \Exception('Code execution failed: ' . $e->getMessage());
+    }
+}
     /**
      * ✅ FIXED MULTIPLE CHOICE VALIDATION
      */
