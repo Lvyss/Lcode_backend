@@ -46,7 +46,8 @@ public function handleGoogleCallback()
         $token = $user->createToken('lcode-token')->plainTextToken;
 
         // ✅ JANGAN ENCODE - biarkan token asli
-        $redirectUrl = 'http://localhost:5173/auth/callback?token=' . $token . '&user_id=' . $user->id;
+        // $redirectUrl = 'http://localhost:5173/auth/callback?token=' . $token . '&user_id=' . $user->id;
+                $redirectUrl = 'https://lcode.vercel.app/auth/callback?token=' . $token . '&user_id=' . $user->id;
         
         Log::info('🔀 Redirecting with RAW token', ['url' => $redirectUrl]);
         
@@ -54,7 +55,8 @@ public function handleGoogleCallback()
 
     } catch (\Exception $e) {
         Log::error('Google OAuth Error: ' . $e->getMessage());
-        return redirect('http://localhost:5173/login?error=auth_failed');
+        // return redirect('http://localhost:5173/login?error=auth_failed');
+        return redirect('https://lcode.vercel.app/login?error=auth_failed');
     }
 }
 
