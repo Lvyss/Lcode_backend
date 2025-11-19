@@ -40,7 +40,16 @@ class User extends Authenticatable
 
     // RELATIONSHIPS
     public function progress() { return $this->hasMany(UserProgress::class); }
-    public function badges() { return $this->belongsToMany(Badge::class, 'user_badges'); }
+   public function badges()
+{
+    return $this->belongsToMany(Badge::class, 'user_badges')
+                ->withPivot('earned_at')
+                ->withTimestamps();
+}
+public function userBadges()
+{
+    return $this->hasMany(UserBadge::class);
+}
     public function tree() { return $this->hasOne(Tree::class); }
     
     // METHODS

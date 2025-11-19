@@ -11,7 +11,7 @@ class Section extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['language_id', 'name', 'description', 'order_index', 'badge_reward', 'is_active'];
+    protected $fillable = ['language_id', 'name', 'description', 'order_index', 'exp_reward', 'is_active'];
 
     public function language(): BelongsTo 
     { 

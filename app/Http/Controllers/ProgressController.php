@@ -6,6 +6,8 @@ use App\Models\UserProgress;
 use App\Models\Part;
 use App\Models\Exercise;
 use App\Models\User;
+use App\Models\Section;
+use App\Services\BadgeService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 class ProgressController extends Controller
 {
-    // ✅ COMPLETE EXERCISE (User submit jawaban exercise)
+
 public function completeExercise(Request $request)
 {
     $request->validate([
@@ -71,23 +73,53 @@ public function completeExercise(Request $request)
         // ✅ CHECK PART COMPLETION
         $partCompleted = false;
         $partExpEarned = 0;
+        $awardedBadges = []; // ✅ NEW: Store awarded badges
         
         if ($isCorrect) {
             $partCompletion = $this->checkPartCompletion($exercise->part_id, $userId);
             $partCompleted = $partCompletion['completed'];
             $partExpEarned = $partCompletion['bonus_exp'];
             
-            // ✅ ADD BONUS EXP TO USER - INI YANG PERLU DITAMBAH!
+            // ✅ ADD PART BONUS EXP TO USER
             if ($partCompleted && $partExpEarned > 0) {
                 $user->total_exp += $partExpEarned;
                 $user->save();
                 $totalExpEarned += $partExpEarned;
                 
-                // ✅ LOG BONUS AWARD
                 Log::info("🎉 PART COMPLETION BONUS AWARDED: User {$userId} earned {$partExpEarned} EXP for completing part {$exercise->part_id}");
-                Log::info("💰 User total_exp before: " . ($user->total_exp - $partExpEarned) . ", after: " . $user->total_exp);
+            }
+            
+            // ✅ CHECK SECTION COMPLETION (HANYA JIKA PART COMPLETED)
+            $sectionCompleted = false;
+            $sectionExpEarned = 0;
+            
+            if ($partCompleted) {
+                $part = Part::find($exercise->part_id);
+                if ($part) {
+                    $sectionCompletion = $this->checkSectionCompletion($part->section_id, $userId);
+                    $sectionCompleted = $sectionCompletion['completed'];
+                    $sectionExpEarned = $sectionCompletion['bonus_exp'];
+                    
+                    // ✅ ADD SECTION BONUS EXP TO USER
+                    if ($sectionCompleted && $sectionExpEarned > 0) {
+                        $user->total_exp += $sectionExpEarned;
+                        $user->save();
+                        $totalExpEarned += $sectionExpEarned;
+                        
+                        Log::info("🏆 SECTION COMPLETION BONUS AWARDED: User {$userId} earned {$sectionExpEarned} EXP for completing section {$part->section_id}");
+                    }
+
+                    // ✅ CHECK AND AWARD BADGES - NEW!
+                    $badgeService = new BadgeService();
+                    $awardedBadges = $badgeService->checkAndAwardBadges($user, $part->section_id);
+                    
+                    Log::info("🎖️ BADGES CHECKED: Awarded " . count($awardedBadges) . " badges for user {$userId}");
+                }
             }
         }
+
+        // ✅ REFRESH USER DATA
+        $user->refresh();
 
         return response()->json([
             'success' => true,
@@ -95,13 +127,15 @@ public function completeExercise(Request $request)
             'exp_earned' => $expEarned,
             'part_completed' => $partCompleted,
             'part_exp_earned' => $partExpEarned,
-            'total_exp_earned' => $totalExpEarned, // ✅ TOTAL YANG DITAMBAHKAN
-            'user_total_exp' => $user->total_exp, // ✅ TOTAL EXP USER SEKARANG
+            'section_completed' => $sectionCompleted ?? false,
+            'section_exp_earned' => $sectionExpEarned ?? 0,
+            'total_exp_earned' => $totalExpEarned,
+            'user_total_exp' => $user->total_exp,
+            'awarded_badges' => $awardedBadges, // ✅ NEW: Return awarded badges
             'progress' => $progress
         ]);
     });
 }
-
     /**
      * CHECK ANSWER CORRECTNESS BERDASARKAN EXERCISE TYPE
      */
@@ -196,7 +230,55 @@ private function validateMultipleChoice(array $solution, string $userAnswer): bo
         return true;
     }
 
-// ✅ UPDATE checkPartCompletion METHOD
+// ✅ TAMBAHIN SETELAH checkPartCompletion METHOD
+private function checkSectionCompletion($sectionId, $userId)
+{
+    Log::info("🔍 CHECKING SECTION COMPLETION: section_id={$sectionId}, user_id={$userId}");
+    
+    $section = Section::find($sectionId);
+    if (!$section) {
+        Log::warning("❌ Section not found: {$sectionId}");
+        return ['completed' => false, 'bonus_exp' => 0];
+    }
+
+    // ✅ GET ALL PARTS IN SECTION
+    $parts = Part::where('section_id', $sectionId)->get();
+    $totalParts = $parts->count();
+    
+    Log::info("📊 Section {$sectionId} has {$totalParts} parts");
+    
+    if ($totalParts === 0) {
+        Log::warning("❌ No parts found for section: {$sectionId}");
+        return ['completed' => false, 'bonus_exp' => 0];
+    }
+
+    // ✅ COUNT COMPLETED PARTS (SEMUA EXERCISES DI PART SELESAI & BENAR)
+    $completedParts = 0;
+    
+    foreach ($parts as $part) {
+        $partCompletion = $this->checkPartCompletion($part->id, $userId);
+        if ($partCompletion['completed']) {
+            $completedParts++;
+            Log::info("✅ Part {$part->id} completed for section {$sectionId}");
+        }
+    }
+
+    Log::info("📈 User {$userId} completed {$completedParts}/{$totalParts} parts in section {$sectionId}");
+
+    $allPartsCompleted = ($completedParts === $totalParts);
+    
+    // ✅ KASIH BONUS EXP JIKA SEMUA PART SELESAI
+    $bonusExp = $allPartsCompleted ? $section->exp_reward : 0;
+
+    Log::info("🎯 Section completion result: completed={$allPartsCompleted}, bonus_exp={$bonusExp}, section->exp_reward={$section->exp_reward}");
+
+    return [
+        'completed' => $allPartsCompleted,
+        'bonus_exp' => $bonusExp,
+        'completed_parts' => $completedParts,
+        'total_parts' => $totalParts
+    ];
+}
 private function checkPartCompletion($partId, $userId)
 {
     Log::info("🔍 CHECKING PART COMPLETION: part_id={$partId}, user_id={$userId}");
@@ -418,4 +500,83 @@ private function checkPartCompletion($partId, $userId)
             ], 500);
         }
     }
+
+    // ✅ TAMBAH METHOD BARU UNTUK GET SECTION PROGRESS
+public function getSectionProgress(Request $request, $sectionId): JsonResponse
+{
+    try {
+        $user = $request->user();
+        
+        if (!$user) {
+            return response()->json([
+                'section_id' => $sectionId,
+                'total_parts' => 0,
+                'completed_parts' => 0,
+                'progress_percentage' => 0,
+                'section_completed' => false
+            ]);
+        }
+
+        // ✅ FIX: PASTIKAN SECTION EXISTS
+        $section = Section::find($sectionId);
+        if (!$section) {
+            return response()->json([
+                'section_id' => $sectionId,
+                'total_parts' => 0,
+                'completed_parts' => 0,
+                'progress_percentage' => 0,
+                'section_completed' => false,
+                'error' => 'Section not found'
+            ], 404);
+        }
+
+        $parts = Part::where('section_id', $sectionId)
+            ->where('is_active', true)
+            ->get();
+            
+        $totalParts = $parts->count();
+        $completedParts = 0;
+        
+        // ✅ CHECK EACH PART COMPLETION
+        foreach ($parts as $part) {
+            $partCompletion = $this->checkPartCompletion($part->id, $user->id);
+            if ($partCompletion['completed']) {
+                $completedParts++;
+            }
+        }
+        
+        $progressPercentage = $totalParts > 0 
+            ? round(($completedParts / $totalParts) * 100) 
+            : 0;
+            
+        $sectionCompleted = ($completedParts === $totalParts);
+        
+        return response()->json([
+            'section_id' => $sectionId,
+            'section_name' => $section->name,
+            'total_parts' => $totalParts,
+            'completed_parts' => $completedParts,
+            'progress_percentage' => $progressPercentage,
+            'section_completed' => $sectionCompleted,
+            'exp_reward' => $section->exp_reward
+        ]);
+        
+    } catch (\Exception $e) {
+        // ✅ LOG ERROR
+        Log::error('getSectionProgress Error: ' . $e->getMessage(), [
+            'section_id' => $sectionId,
+            'user_id' => $request->user()?->id,
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return response()->json([
+            'section_id' => $sectionId,
+            'total_parts' => 0,
+            'completed_parts' => 0,
+            'progress_percentage' => 0,
+            'section_completed' => false,
+            'error' => 'Server error'
+        ], 500);
+    }
+}
 } // ✅ INI CLOSING BRACKET YANG MISSING!

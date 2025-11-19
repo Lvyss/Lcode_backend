@@ -18,7 +18,7 @@ Schema::create('sections', function (Blueprint $table) {
     $table->string('name'); // "Hello World", "Operator Kondisi"
     $table->text('description')->nullable();
     $table->integer('order_index')->default(0);
-    $table->integer('badge_reward')->default(0); // EXP bonus
+    $table->integer('exp_reward')->default(0); // EXP bonus
     $table->boolean('is_active')->default(true);
     $table->timestamps();
 });

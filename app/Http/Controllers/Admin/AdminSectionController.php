@@ -25,7 +25,7 @@ class AdminSectionController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'order_index' => 'sometimes|integer', // ✅ UBAH KE sometimes
-            'badge_reward' => 'required|integer|min:0',
+            'exp_reward' => 'required|integer|min:0',
             'is_active' => 'sometimes|boolean',
         ]);
 
@@ -56,7 +56,7 @@ class AdminSectionController extends Controller
             'name' => 'sometimes|string|max:255',
             'description' => 'nullable|string',
             'order_index' => 'sometimes|integer',
-            'badge_reward' => 'sometimes|integer|min:0',
+            'exp_reward' => 'sometimes|integer|min:0',
             'is_active' => 'sometimes|boolean',
         ]);
 
